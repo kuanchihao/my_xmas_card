@@ -707,32 +707,39 @@
             }
 
 
-            addTextPhoto(text) {
-    // 1. 設定固定寬度，高度則根據內容彈性調整
-    const width = 500;
-    const padding = 60; // 邊距
+            這通常是因為文字在 Canvas 繪製時，我們計算的「畫布尺寸」與 3D 空間中的「Mesh 模型尺寸」沒有同步更新，導致長方形的文字貼圖被強行擠壓進一個正方形的框框裡。
+
+要徹底解決「超出」或「顯示不全」的問題，我們需要從 Canvas 繪製邏輯與 3D 模型比例兩方面同時下手。
+
+優化後的解決方案
+請將 addTextPhoto 函式替換為以下版本，這段程式碼特別強化了中文邊距處理與 3D 模型比例適應：
+
+JavaScript
+
+addTextPhoto(text) {
+    // 1. 設定基礎參數
+    const width = 600; // 稍微加寬畫布
+    const padding = 70;
     const maxWidth = width - (padding * 2);
-    const fontSize = 44; // 調小一點讓文字容納更多
-    const lineHeight = 60; 
+    const fontSize = 40; // 適合閱讀的中文大小
+    const lineHeight = 60;
 
     const canvas = document.createElement('canvas');
     const ctx = canvas.getContext('2d');
-    ctx.font = `bold ${fontSize}px "Times New Roman", serif`;
+    ctx.font = `bold ${fontSize}px "Microsoft JhengHei", "PingFang TC", sans-serif`;
 
-    // 2. 自動換行處理函式 (支援中文無空格換行)
+    // 2. 自動換行計算函式
     function getLines(context, text, maxWidth) {
-        const words = text.split(""); // 將每個字拆開處理
+        const words = text.split(""); 
         let lines = [];
-        let currentLine = words[0];
+        let currentLine = "";
 
-        for (let n = 1; n < words.length; n++) {
-            let word = words[n];
-            let testLine = currentLine + word;
+        for (let n = 0; n < words.length; n++) {
+            let testLine = currentLine + words[n];
             let metrics = context.measureText(testLine);
-            let testWidth = metrics.width;
-            if (testWidth > maxWidth && n > 0) {
+            if (metrics.width > maxWidth && n > 0) {
                 lines.push(currentLine);
-                currentLine = word;
+                currentLine = words[n];
             } else {
                 currentLine = testLine;
             }
@@ -743,46 +750,46 @@
 
     const lines = getLines(ctx, text, maxWidth);
     
-    // 3. 根據行數設定畫布高度 (例如每行 60px + 上下邊距)
-    const height = Math.max(700, (lines.length * lineHeight) + (padding * 3));
+    // 3. 重要：根據行數動態計算高度，並給予上下預留空間
+    const textContentHeight = lines.length * lineHeight;
+    const height = textContentHeight + (padding * 3); // 確保高度足夠
+
     canvas.width = width;
     canvas.height = height;
 
-    // --- 開始繪製 ---
-    // 背景 (象牙色)
+    // --- 開始繪製背景與邊框 ---
     ctx.fillStyle = '#FDF5E6';
     ctx.fillRect(0, 0, width, height);
 
-    // 金色邊框 (動態適應高度)
+    // 金色雙邊框
     ctx.strokeStyle = '#D4AF37';
-    ctx.lineWidth = 15;
+    ctx.lineWidth = 10;
     ctx.strokeRect(20, 20, width - 40, height - 40);
-    ctx.lineWidth = 4;
+    ctx.lineWidth = 2;
     ctx.strokeRect(35, 35, width - 70, height - 70);
 
-    // 繪製文字
-    ctx.fillStyle = '#8B0000'; // 深紅色
+    // --- 繪製文字 (垂直置中) ---
+    ctx.fillStyle = '#8B0000';
     ctx.textAlign = 'center';
-    ctx.textBaseline = 'top'; // 改用 top 較好計算間距
-    ctx.font = `bold ${fontSize}px "Times New Roman", serif`;
+    ctx.textBaseline = 'middle';
+    ctx.font = `bold ${fontSize}px "Microsoft JhengHei", "PingFang TC", sans-serif`;
 
-    const startY = (height - (lines.length * lineHeight)) / 2;
     lines.forEach((line, index) => {
-        ctx.fillText(line, width / 2, startY + (index * lineHeight));
+        // 計算每一行的 Y 座標，使其在畫布中整體置中
+        const y = (height / 2) - (textContentHeight / 2) + (index * lineHeight) + (lineHeight / 2);
+        ctx.fillText(line, width / 2, y);
     });
 
-    // 裝飾小圓點
-    ctx.fillStyle = '#D4AF37';
-    ctx.beginPath(); ctx.arc(width / 2, 80, 8, 0, Math.PI * 2); ctx.fill();
-    ctx.beginPath(); ctx.arc(width / 2, height - 80, 8, 0, Math.PI * 2); ctx.fill();
-
+    // 4. 生成貼圖
     const texture = new THREE.CanvasTexture(canvas);
     texture.colorSpace = THREE.SRGBColorSpace;
 
-    // 調整 3D 模型比例 (高度隨畫布長度調整)
-    const worldWidth = 1.0; 
-    const worldHeight = (height / width) * worldWidth;
-    this.addPhotoToScene(texture, true, worldWidth, worldHeight);
+    // 5. 關鍵修復：根據 Canvas 的長寬比，動態調整 3D 模型的大小
+    // 假設寬度固定為 1.5 單位，高度則根據比例縮放
+    const meshWidth = 1.5;
+    const meshHeight = (height / width) * meshWidth;
+
+    this.addPhotoToScene(texture, true, meshWidth, meshHeight);
 }
 
             addPhotoToScene(texture, isDefault = false, width = 0.6, height = 0.6) {
